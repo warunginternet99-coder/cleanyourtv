@@ -1,4 +1,3 @@
-
 package com.gathin.tvhome;
  
 import android.content.Context;
@@ -42,7 +41,7 @@ public class MuCards extends LinearLayout {
     static final String AUTH = "content://com.handica.mugames/";
     static final int GOLD = 0xFFF7D046, MUTED = 0xFFB9B0CC, WHITE = 0xFFFFFFFF;
  
-    static class Mt { long t; String home = "?", away = "?"; int hs = -1, as = -1; boolean done, muHome; }
+    static class Mt { long t; String home = "?", away = "?", lg = "Premier League"; int hs = -1, as = -1; boolean done, muHome; }
     static class Row { int pos, played, pts; String name = "?"; boolean me; }
  
     final TimeZone wib = TimeZone.getTimeZone("Asia/Jakarta");
@@ -52,7 +51,7 @@ public class MuCards extends LinearLayout {
     List<Mt> matches = new ArrayList<Mt>();
     List<Row> table = new ArrayList<Row>();
     String city = "", temp = "", wdesc = "";
-    TextView title, countdown, whenTv, lastHead, lastLines, side, weatherTv;
+    TextView kickerTv, title, countdown, whenTv, lastHead, lastLines, side, weatherTv;
     LinearLayout formRow, standings;
     ImageView crest;
     long kickoff = 0;
@@ -105,10 +104,10 @@ public class MuCards extends LinearLayout {
         LayoutParams barLp = new LayoutParams(dp(4), dp(14));
         barLp.rightMargin = dp(9);
         kRow.addView(bar, barLp);
-        TextView kicker = tv(11, WHITE, true);
-        kicker.setText("PREMIER LEAGUE");
-        kicker.setLetterSpacing(0.12f);
-        kRow.addView(kicker);
+        kickerTv = tv(11, WHITE, true);
+        kickerTv.setText("PREMIER LEAGUE");
+        kickerTv.setLetterSpacing(0.12f);
+        kRow.addView(kickerTv);
  
         title = tv(22, WHITE, false); title.setText("Memuat…");
         title.setPadding(0, dp(5), 0, 0);
@@ -252,6 +251,7 @@ public class MuCards extends LinearLayout {
                         Mt m = new Mt();
                         m.t = c.getLong(0); m.home = c.getString(1); m.away = c.getString(2);
                         m.hs = c.getInt(3); m.as = c.getInt(4); m.done = c.getInt(5) == 1; m.muHome = c.getInt(6) == 1;
+                        if (c.getColumnCount() > 7 && c.getString(7) != null && c.getString(7).length() > 0) m.lg = c.getString(7);
                         ms.add(m);
                     }
                 } catch (Exception e) { ms.clear(); } finally { if (c != null) c.close(); }
@@ -361,6 +361,7 @@ public class MuCards extends LinearLayout {
         }
         if (next != null) {
             kickoff = next.t;
+            kickerTv.setText(next.lg.toUpperCase(id));
             title.setText(next.home + " vs " + next.away);
             whenTv.setText(full.format(new Date(next.t)) + " WIB");
             side.setText(next.muHome ? "KANDANG" : "TANDANG");
