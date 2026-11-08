@@ -2,14 +2,18 @@
 package com.gathin.tvhome;
  
 import android.content.Context;
+import android.database.ContentObserver;
+import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -19,16 +23,7 @@ import android.view.ViewParent;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import org.json.JSONArray;
-import org.json.JSONObject;
-import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -39,30 +34,30 @@ import java.util.Locale;
 import java.util.TimeZone;
  
 /**
- * Kartu jadwal + klasemen Manchester United untuk Home (menggantikan isi racePanel).
- * Data dari ESPN; jika gagal, memakai data contoh per 6 Nov 2026.
+ * Kartu jadwal + klasemen Manchester United untuk Home (mengisi racePanel).
+ * Peluncur tidak punya izin internet: datanya dibaca dari add-on MU Games (com.handica.mugames).
+ * Logo: crest.png di folder data peluncur jika ada, kalau tidak perisai sederhana.
  */
 public class MuCards extends LinearLayout {
-    static final String ESPN_TEAM = "360";
-    static final String SCHEDULE = "https://site.api.espn.com/apis/site/v2/sports/soccer/all/teams/360/schedule";
-    static final String TABLE = "https://site.api.espn.com/apis/v2/sports/soccer/eng.1/standings";
-    static final String CREST = "https://a.espncdn.com/combiner/i?img=/i/teamlogos/soccer/500/360.png&w=128&h=128";
+    static final String AUTH = "content://com.handica.mugames/";
     static final int GOLD = 0xFFF7D046, MUTED = 0xFFB9B0CC, WHITE = 0xFFFFFFFF;
-    static final long REFRESH_MS = 30 * 60 * 1000L;
  
-    static class Mt { long t; String home = "?", away = "?"; int hs = -1, as = -1; boolean done; boolean muHome; }
+    static class Mt { long t; String home = "?", away = "?"; int hs = -1, as = -1; boolean done, muHome; }
     static class Row { int pos, played, pts; String name = "?"; boolean me; }
  
     final TimeZone wib = TimeZone.getTimeZone("Asia/Jakarta");
     final Locale id = new Locale("id", "ID");
     final float density = getResources().getDisplayMetrics().density;
+    final Handler main = new Handler(Looper.getMainLooper());
     List<Mt> matches = new ArrayList<Mt>();
     List<Row> table = new ArrayList<Row>();
-    TextView title, countdown, whenTv, lastTv, side;
+    String city = "", temp = "", wdesc = "";
+    TextView title, countdown, whenTv, lastHead, lastLines, side, weatherTv;
     LinearLayout formRow, standings;
     ImageView crest;
     long kickoff = 0;
     boolean attached;
+    ContentObserver observer;
  
     public MuCards(Context c) { super(c); init(); }
     public MuCards(Context c, AttributeSet a) { super(c, a); init(); }
@@ -82,9 +77,9 @@ public class MuCards extends LinearLayout {
     LinearLayout card() {
         LinearLayout l = new LinearLayout(getContext());
         l.setOrientation(VERTICAL);
-        l.setPadding(dp(14), dp(10), dp(14), dp(10));
+        l.setPadding(dp(18), dp(12), dp(18), dp(10));
         GradientDrawable g = new GradientDrawable();
-        g.setColor(0xB3180F28); g.setCornerRadius(dp(14)); g.setStroke(dp(1), 0x28FFFFFF);
+        g.setColor(0xB3180F28); g.setCornerRadius(dp(20)); g.setStroke(dp(1), 0x33FFFFFF);
         l.setBackground(g);
         return l;
     }
@@ -94,58 +89,96 @@ public class MuCards extends LinearLayout {
         setFocusable(false);
         setClipChildren(false);
  
-        // Kartu kiri: jadwal
+        // ===== Kartu kiri: jadwal =====
         LinearLayout left = card();
         left.setOrientation(HORIZONTAL);
         LinearLayout col = new LinearLayout(getContext());
         col.setOrientation(VERTICAL);
-        TextView kicker = tv(9, GOLD, true); kicker.setText("PREMIER LEAGUE");
-        title = tv(18, WHITE, true); title.setText("Memuat…");
-        title.setPadding(0, dp(3), 0, 0);
-        countdown = tv(12, GOLD, true);
-        whenTv = tv(10, MUTED, false);
+ 
+        LinearLayout kRow = new LinearLayout(getContext());
+        kRow.setOrientation(HORIZONTAL);
+        kRow.setGravity(Gravity.CENTER_VERTICAL);
+        View bar = new View(getContext());
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(GOLD); bg.setCornerRadius(dp(2));
+        bar.setBackground(bg);
+        LayoutParams barLp = new LayoutParams(dp(4), dp(14));
+        barLp.rightMargin = dp(9);
+        kRow.addView(bar, barLp);
+        TextView kicker = tv(11, WHITE, true);
+        kicker.setText("PREMIER LEAGUE");
+        kicker.setLetterSpacing(0.12f);
+        kRow.addView(kicker);
+ 
+        title = tv(22, WHITE, false); title.setText("Memuat…");
+        title.setPadding(0, dp(5), 0, 0);
+        countdown = tv(15, GOLD, true);
+        countdown.setPadding(0, dp(4), 0, 0);
+        whenTv = tv(12.5f, MUTED, false);
+        whenTv.setPadding(0, dp(2), 0, 0);
+ 
         formRow = new LinearLayout(getContext());
         formRow.setOrientation(HORIZONTAL);
         formRow.setGravity(Gravity.CENTER_VERTICAL);
-        formRow.setPadding(0, dp(5), 0, dp(5));
+        formRow.setPadding(0, dp(6), 0, dp(6));
+ 
         View line = new View(getContext());
-        line.setBackgroundColor(0x28FFFFFF);
-        lastTv = new TextView(getContext());
-        lastTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
-        lastTv.setTextColor(MUTED);
-        lastTv.setIncludeFontPadding(false);
-        lastTv.setLineSpacing(0, 1.15f);
-        col.addView(kicker); col.addView(title); col.addView(countdown); col.addView(whenTv); col.addView(formRow);
+        line.setBackgroundColor(0x33FFFFFF);
+        lastHead = tv(13, WHITE, true);
+        lastHead.setPadding(0, dp(6), 0, 0);
+        lastLines = new TextView(getContext());
+        lastLines.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        lastLines.setTextColor(MUTED);
+        lastLines.setIncludeFontPadding(false);
+        lastLines.setLineSpacing(0, 1.15f);
+        lastLines.setPadding(0, dp(3), 0, 0);
+ 
+        col.addView(kRow); col.addView(title); col.addView(countdown); col.addView(whenTv); col.addView(formRow);
         col.addView(line, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1))));
-        LinearLayout.LayoutParams lt = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lt.topMargin = dp(5);
-        col.addView(lastTv, lt);
+        col.addView(lastHead); col.addView(lastLines);
         left.addView(col, new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
  
         LinearLayout rightCol = new LinearLayout(getContext());
         rightCol.setOrientation(VERTICAL);
         rightCol.setGravity(Gravity.END);
-        side = tv(9, GOLD, true);
+        side = tv(12, GOLD, true);
+        side.setLetterSpacing(0.1f);
         crest = new ImageView(getContext());
         crest.setScaleType(ImageView.ScaleType.FIT_CENTER);
         rightCol.addView(side);
-        LayoutParams cl = new LayoutParams(dp(62), dp(62));
-        cl.topMargin = dp(6);
+        LayoutParams cl = new LayoutParams(dp(72), dp(72));
+        cl.topMargin = dp(10);
         rightCol.addView(crest, cl);
-        left.addView(rightCol, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        left.addView(rightCol, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
  
-        // Kartu kanan: klasemen
+        // ===== Kartu kanan: klasemen =====
         LinearLayout right = card();
-        TextView k2 = tv(9, GOLD, true); k2.setText("KLASEMEN PREMIER LEAGUE");
+        LinearLayout wRow = new LinearLayout(getContext());
+        wRow.setOrientation(HORIZONTAL);
+        wRow.setGravity(Gravity.CENTER_VERTICAL);
+        View sq = new View(getContext());
+        GradientDrawable sg = new GradientDrawable();
+        sg.setColor(GOLD); sg.setCornerRadius(dp(2));
+        sq.setBackground(sg);
+        LayoutParams sqLp = new LayoutParams(dp(8), dp(8));
+        sqLp.rightMargin = dp(9);
+        wRow.addView(sq, sqLp);
+        weatherTv = tv(11, WHITE, true);
+        weatherTv.setLetterSpacing(0.04f);
+        wRow.addView(weatherTv);
+        TextView k2 = tv(15, WHITE, true);
+        k2.setText("KLASEMEN PREMIER LEAGUE");
+        k2.setLetterSpacing(0.1f);
+        k2.setPadding(0, dp(5), 0, dp(4));
         standings = new LinearLayout(getContext());
         standings.setOrientation(VERTICAL);
-        standings.setPadding(0, dp(4), 0, 0);
-        right.addView(k2); right.addView(standings);
+        right.addView(wRow); right.addView(k2); right.addView(standings);
  
-        LayoutParams lp1 = new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f);
-        lp1.rightMargin = dp(12);
+        // Lebar kiri:kanan mengikuti foto contoh (sekitar 1,85 : 1); tinggi kedua kartu sama.
+        LayoutParams lp1 = new LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.85f);
+        lp1.rightMargin = dp(22);
         addView(left, lp1);
-        addView(right, new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        addView(right, new LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
         setPlaceholderCrest();
     }
  
@@ -165,14 +198,24 @@ public class MuCards extends LinearLayout {
         }
         loadSnapshot();
         render();
-        refresh();
+        loadOwnCrest();
+        observer = new ContentObserver(main) {
+            @Override public void onChange(boolean selfChange) { reload(); }
+        };
+        try {
+            for (String s : new String[]{"matches", "table", "weather"})
+                getContext().getContentResolver().registerContentObserver(Uri.parse(AUTH + s), true, observer);
+        } catch (Exception e) { }
+        reload();
         post(tick);
+        postDelayed(poll, 60000);
     }
  
     @Override protected void onDetachedFromWindow() {
         attached = false;
         removeCallbacks(tick);
-        removeCallbacks(again);
+        removeCallbacks(poll);
+        try { if (observer != null) getContext().getContentResolver().unregisterContentObserver(observer); } catch (Exception e) { }
         super.onDetachedFromWindow();
     }
  
@@ -184,15 +227,60 @@ public class MuCards extends LinearLayout {
                 if (d <= 0) countdown.setText("Pertandingan berlangsung / selesai");
                 else {
                     long dd = d / 86400000L, hh = d % 86400000L / 3600000L, mm = d % 3600000L / 60000L;
-                    countdown.setText("Kick-off dalam " + (dd > 0 ? dd + " hari " : "") + hh + " j " + mm + " mnt");
+                    countdown.setText(dd > 0 ? "Kick-off dalam " + dd + " hari " + hh + "j" : "Kick-off dalam " + hh + "j " + mm + "m");
                 }
             }
             postDelayed(this, 30000);
         }
     };
-    final Runnable again = new Runnable() { public void run() { if (attached) refresh(); } };
+    final Runnable poll = new Runnable() {
+        public void run() { if (attached) { reload(); postDelayed(this, 300000); } }
+    };
  
-    // ---------- Data ----------
+    // ---------- Data dari add-on ----------
+ 
+    void reload() {
+        new Thread(new Runnable() {
+            public void run() {
+                final List<Mt> ms = new ArrayList<Mt>();
+                final List<Row> rows = new ArrayList<Row>();
+                final String[] w = {"", "", ""};
+                Cursor c = null;
+                try {
+                    c = getContext().getContentResolver().query(Uri.parse(AUTH + "matches"), null, null, null, null);
+                    while (c != null && c.moveToNext()) {
+                        Mt m = new Mt();
+                        m.t = c.getLong(0); m.home = c.getString(1); m.away = c.getString(2);
+                        m.hs = c.getInt(3); m.as = c.getInt(4); m.done = c.getInt(5) == 1; m.muHome = c.getInt(6) == 1;
+                        ms.add(m);
+                    }
+                } catch (Exception e) { ms.clear(); } finally { if (c != null) c.close(); }
+                try {
+                    c = getContext().getContentResolver().query(Uri.parse(AUTH + "table"), null, null, null, null);
+                    while (c != null && c.moveToNext()) {
+                        Row r = new Row();
+                        r.pos = c.getInt(0); r.name = c.getString(1); r.played = c.getInt(2); r.pts = c.getInt(3); r.me = c.getInt(4) == 1;
+                        rows.add(r);
+                    }
+                } catch (Exception e) { rows.clear(); } finally { if (c != null) c.close(); }
+                try {
+                    c = getContext().getContentResolver().query(Uri.parse(AUTH + "weather"), null, null, null, null);
+                    if (c != null && c.moveToFirst()) { w[0] = c.getString(0); w[1] = c.getString(1); w[2] = c.getString(2); }
+                } catch (Exception e) { } finally { if (c != null) c.close(); }
+                main.post(new Runnable() {
+                    public void run() {
+                        if (!attached) return;
+                        if (!ms.isEmpty()) matches = ms;
+                        if (!rows.isEmpty()) table = rows;
+                        city = w[0]; temp = w[1]; wdesc = w[2];
+                        render();
+                    }
+                });
+            }
+        }).start();
+    }
+ 
+    // ---------- Data awal (jika add-on belum terpasang) ----------
  
     SimpleDateFormat utcFmt() {
         SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'", Locale.US);
@@ -228,122 +316,6 @@ public class MuCards extends LinearLayout {
         table.add(row(17, "Man United", 9, 7, true)); table.add(row(18, "Crystal Palace", 9, 7, false));
     }
  
-    void refresh() {
-        new Thread(new Runnable() {
-            public void run() {
-                try {
-                    List<Mt> all = new ArrayList<Mt>();
-                    addEvents(all, get(SCHEDULE));
-                    try { addEvents(all, get(SCHEDULE + "?fixture=true")); } catch (Exception e) { }
-                    final List<Mt> ms = dedupe(all);
-                    if (!ms.isEmpty()) post(new Runnable() { public void run() { matches = ms; render(); } });
-                } catch (Exception e) { }
-                try {
-                    final List<Row> rows = parseTable(get(TABLE));
-                    if (!rows.isEmpty()) post(new Runnable() { public void run() { table = rows; render(); } });
-                } catch (Exception e) { }
-                try { loadCrest(); } catch (Exception e) { }
-            }
-        }).start();
-        removeCallbacks(again);
-        postDelayed(again, REFRESH_MS);
-    }
- 
-    List<Mt> dedupe(List<Mt> in) {
-        List<Mt> out = new ArrayList<Mt>();
-        for (Mt m : in) {
-            boolean dup = false;
-            for (Mt o : out) if (Math.abs(o.t - m.t) < 3600000L && o.home.equals(m.home) && o.away.equals(m.away)) {
-                if (m.done && !o.done) { o.done = true; o.hs = m.hs; o.as = m.as; }
-                dup = true; break;
-            }
-            if (!dup) out.add(m);
-        }
-        return out;
-    }
- 
-    static int scoreOf(JSONObject c) {
-        Object s = c.opt("score");
-        try {
-            if (s instanceof JSONObject) {
-                JSONObject o = (JSONObject) s;
-                if (o.has("value")) return (int) Math.round(o.getDouble("value"));
-                return Integer.parseInt(o.optString("displayValue", "-1"));
-            }
-            if (s != null && s != JSONObject.NULL) return (int) Math.round(Double.parseDouble(String.valueOf(s)));
-        } catch (Exception e) { }
-        return -1;
-    }
- 
-    void addEvents(List<Mt> out, String body) throws Exception {
-        JSONArray events = new JSONObject(body).getJSONArray("events");
-        SimpleDateFormat utc = utcFmt();
-        for (int i = 0; i < events.length(); i++) {
-            JSONObject e = events.getJSONObject(i);
-            String date = e.optString("date", "");
-            JSONArray comps = e.optJSONArray("competitions");
-            if (date.length() < 16 || comps == null || comps.length() == 0) continue;
-            JSONObject comp = comps.getJSONObject(0);
-            JSONArray cs = comp.optJSONArray("competitors");
-            if (cs == null) continue;
-            Mt m = new Mt();
-            boolean haveH = false, haveA = false;
-            for (int k = 0; k < cs.length(); k++) {
-                JSONObject c = cs.getJSONObject(k);
-                JSONObject team = c.optJSONObject("team");
-                String nm = team == null ? "?" : team.optString("shortDisplayName", team.optString("displayName", "?"));
-                String tid = team == null ? "" : team.optString("id", "");
-                if ("home".equals(c.optString("homeAway"))) { m.home = nm; m.hs = scoreOf(c); haveH = true; if (ESPN_TEAM.equals(tid)) m.muHome = true; }
-                else if ("away".equals(c.optString("homeAway"))) { m.away = nm; m.as = scoreOf(c); haveA = true; }
-            }
-            if (!haveH || !haveA) continue;
-            JSONObject st = comp.optJSONObject("status");
-            if (st == null) st = e.optJSONObject("status");
-            JSONObject type = st == null ? null : st.optJSONObject("type");
-            m.done = type != null && type.optBoolean("completed", false);
-            m.t = utc.parse(date.substring(0, 16) + "Z").getTime();
-            out.add(m);
-        }
-    }
- 
-    List<Row> parseTable(String body) throws Exception {
-        JSONObject o = new JSONObject(body);
-        JSONArray ch = o.optJSONArray("children");
-        JSONObject std = ch != null ? ch.getJSONObject(0).getJSONObject("standings") : o.getJSONObject("standings");
-        JSONArray entries = std.getJSONArray("entries");
-        List<Row> rows = new ArrayList<Row>();
-        for (int i = 0; i < entries.length(); i++) {
-            JSONObject e = entries.getJSONObject(i);
-            JSONObject team = e.getJSONObject("team");
-            Row r = new Row();
-            r.name = team.optString("shortDisplayName", team.optString("displayName", "?"));
-            r.me = ESPN_TEAM.equals(team.optString("id", ""));
-            r.pos = i + 1;
-            JSONArray stats = e.optJSONArray("stats");
-            for (int k = 0; stats != null && k < stats.length(); k++) {
-                JSONObject s = stats.getJSONObject(k);
-                String n = s.optString("name", "");
-                if (n.equals("rank")) r.pos = (int) s.optDouble("value", r.pos);
-                else if (n.equals("points")) r.pts = (int) s.optDouble("value", 0);
-                else if (n.equals("gamesPlayed")) r.played = (int) s.optDouble("value", 0);
-            }
-            rows.add(r);
-        }
-        Collections.sort(rows, new Comparator<Row>() { public int compare(Row a, Row b) { return a.pos - b.pos; } });
-        return rows;
-    }
- 
-    String get(String url) throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-        c.setRequestProperty("User-Agent", "cleanyourtv");
-        c.setConnectTimeout(15000); c.setReadTimeout(15000);
-        BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), "UTF-8"));
-        StringBuilder sb = new StringBuilder(); String line;
-        while ((line = r.readLine()) != null) sb.append(line);
-        r.close();
-        return sb.toString();
-    }
- 
     // ---------- Logo ----------
  
     void setPlaceholderCrest() {
@@ -361,41 +333,26 @@ public class MuCards extends LinearLayout {
         crest.setImageBitmap(bm);
     }
  
-    void loadCrest() throws Exception {
-        File dir = getContext().getFilesDir();
-        File cached = new File(dir, "crest_mu.png");
-        File own = null;
+    /** crest.png buatanmu di /sdcard/Android/data/com.gathin.tvhome/files/ menggantikan perisai sederhana. */
+    void loadOwnCrest() {
         try {
             File ext = getContext().getExternalFilesDir(null);
-            if (ext != null) own = new File(ext, "crest.png");
+            if (ext == null) return;
+            File f = new File(ext, "crest.png");
+            if (!f.exists()) return;
+            Bitmap bm = BitmapFactory.decodeFile(f.getAbsolutePath());
+            if (bm != null) crest.setImageBitmap(bm);
         } catch (Exception e) { }
-        File use = null;
-        if (own != null && own.exists()) use = own;
-        else {
-            if (!cached.exists()) {
-                HttpURLConnection c = (HttpURLConnection) new URL(CREST).openConnection();
-                c.setRequestProperty("User-Agent", "cleanyourtv");
-                c.setConnectTimeout(15000); c.setReadTimeout(15000);
-                InputStream in = c.getInputStream();
-                ByteArrayOutputStream bo = new ByteArrayOutputStream();
-                byte[] buf = new byte[4096]; int n;
-                while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
-                in.close();
-                FileOutputStream fo = new FileOutputStream(cached);
-                fo.write(bo.toByteArray()); fo.close();
-            }
-            use = cached;
-        }
-        final Bitmap bm = BitmapFactory.decodeFile(use.getAbsolutePath());
-        if (bm != null) post(new Runnable() { public void run() { crest.setImageBitmap(bm); } });
     }
  
     // ---------- Tampilan ----------
  
+    String opp(Mt m) { return m.muHome ? m.away : m.home; }
+ 
     void render() {
         Collections.sort(matches, new Comparator<Mt>() { public int compare(Mt a, Mt b) { return a.t < b.t ? -1 : a.t > b.t ? 1 : 0; } });
-        SimpleDateFormat out = new SimpleDateFormat("EEEE d MMM HH:mm", id);
-        out.setTimeZone(wib);
+        SimpleDateFormat full = new SimpleDateFormat("EEEE d MMM HH:mm", id); full.setTimeZone(wib);
+        SimpleDateFormat shortF = new SimpleDateFormat("EEE d MMM HH:mm", id); shortF.setTimeZone(wib);
         long now = System.currentTimeMillis();
         Mt next = null; List<Mt> done = new ArrayList<Mt>(); List<Mt> later = new ArrayList<Mt>();
         for (Mt m : matches) {
@@ -405,74 +362,80 @@ public class MuCards extends LinearLayout {
         if (next != null) {
             kickoff = next.t;
             title.setText(next.home + " vs " + next.away);
-            whenTv.setText(out.format(new Date(next.t)) + " WIB");
+            whenTv.setText(full.format(new Date(next.t)) + " WIB");
             side.setText(next.muHome ? "KANDANG" : "TANDANG");
         } else { kickoff = 0; title.setText("Tidak ada jadwal"); countdown.setText(""); whenTv.setText(""); side.setText(""); }
  
         formRow.removeAllViews();
-        TextView fl = tv(9, MUTED, true); fl.setText("FORM");
+        TextView fl = tv(12, MUTED, true); fl.setText("FORM"); fl.setLetterSpacing(0.08f);
         LayoutParams flp = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        flp.rightMargin = dp(6);
+        flp.rightMargin = dp(10);
         formRow.addView(fl, flp);
         for (int i = Math.max(0, done.size() - 5); i < done.size(); i++) {
             Mt m = done.get(i);
             int mine = m.muHome ? m.hs : m.as, theirs = m.muHome ? m.as : m.hs;
             String r = mine > theirs ? "M" : mine == theirs ? "S" : "K";
-            TextView c = tv(10, WHITE, true);
+            TextView c = tv(13, WHITE, true);
             c.setText(r); c.setGravity(Gravity.CENTER);
             GradientDrawable g = new GradientDrawable();
             g.setColor(r.equals("M") ? 0xFF18B56B : r.equals("S") ? 0xFF8896A8 : 0xFFD93A3A);
-            g.setCornerRadius(dp(5));
+            g.setCornerRadius(dp(6));
             c.setBackground(g);
-            LayoutParams lp = new LayoutParams(dp(20), dp(20));
-            lp.rightMargin = dp(4);
+            LayoutParams lp = new LayoutParams(dp(26), dp(26));
+            lp.rightMargin = dp(5);
             formRow.addView(c, lp);
         }
-        StringBuilder sb = new StringBuilder();
         if (!done.isEmpty()) {
             Mt l = done.get(done.size() - 1);
-            sb.append("Terakhir: ").append(l.home).append(" ").append(l.hs).append(" – ").append(l.as).append(" ").append(l.away);
-        }
+            lastHead.setText("Terakhir: " + l.home + " " + l.hs + " - " + l.as + " " + l.away);
+        } else lastHead.setText("");
+        StringBuilder sb = new StringBuilder();
         for (Mt m : later) {
             if (sb.length() > 0) sb.append("\n");
-            sb.append("Lalu: ").append(m.home).append(" vs ").append(m.away).append(" · ").append(out.format(new Date(m.t))).append(" WIB");
+            sb.append(m.muHome ? "vs " : "di ").append(opp(m)).append(" · ").append(shortF.format(new Date(m.t))).append(" WIB");
         }
-        lastTv.setText(sb.toString());
+        lastLines.setText(sb.toString());
+ 
+        String wtxt = city;
+        if (temp != null && temp.length() > 0) wtxt += " · " + temp;
+        if (wdesc != null && wdesc.length() > 0) wtxt += " · " + wdesc;
+        weatherTv.setText(wtxt);
  
         standings.removeAllViews();
-        standings.addView(rowView("#", "TIM", "M", "POIN", false, MUTED));
+        standings.addView(rowView("#", "TIM", "M", "POIN", false, MUTED, 11, false));
         int me = 1;
         for (Row r : table) if (r.me) me = r.pos;
         int prev = 0;
         for (Row r : table) {
-            boolean show = r.pos <= 3 || Math.abs(r.pos - me) <= 1;
+            boolean show = r.pos <= 2 || Math.abs(r.pos - me) <= 1;
             if (!show) continue;
             if (prev != 0 && r.pos - prev > 1) {
-                TextView d = tv(10, MUTED, false); d.setText("⋮"); d.setGravity(Gravity.CENTER);
-                standings.addView(d);
+                View gap = new View(getContext());
+                standings.addView(gap, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(5)));
             }
-            standings.addView(rowView(String.valueOf(r.pos), r.name, String.valueOf(r.played), String.valueOf(r.pts), r.me, WHITE));
+            standings.addView(rowView(String.valueOf(r.pos), r.name, String.valueOf(r.played), String.valueOf(r.pts), r.me, WHITE, 14, true));
             prev = r.pos;
         }
         post(tick);
     }
  
-    LinearLayout rowView(String a, String b, String c, String d, boolean me, int base) {
+    LinearLayout rowView(String a, String b, String c, String d, boolean me, int base, float sp, boolean bold) {
         int col = me ? GOLD : base;
         LinearLayout l = new LinearLayout(getContext());
         l.setOrientation(HORIZONTAL);
-        l.setPadding(dp(5), dp(2), dp(5), dp(2));
-        TextView ta = tv(11, col, me); ta.setText(a);
-        TextView tb = tv(11, col, me); tb.setText(b);
-        TextView tc = tv(11, col, me); tc.setText(c); tc.setGravity(Gravity.END);
-        TextView td = tv(11, col, me); td.setText(d); td.setGravity(Gravity.END);
-        l.addView(ta, new LayoutParams(dp(22), ViewGroup.LayoutParams.WRAP_CONTENT));
+        l.setGravity(Gravity.CENTER_VERTICAL);
+        l.setPadding(dp(8), dp(3), dp(8), dp(3));
+        TextView ta = tv(sp, col, bold); ta.setText(a);
+        TextView tb = tv(sp, col, bold); tb.setText(b);
+        TextView tc = tv(sp, col, bold); tc.setText(c); tc.setGravity(Gravity.END);
+        TextView td = tv(sp, col, bold); td.setText(d); td.setGravity(Gravity.END);
+        l.addView(ta, new LayoutParams(dp(30), ViewGroup.LayoutParams.WRAP_CONTENT));
         l.addView(tb, new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        l.addView(tc, new LayoutParams(dp(26), ViewGroup.LayoutParams.WRAP_CONTENT));
-        l.addView(td, new LayoutParams(dp(40), ViewGroup.LayoutParams.WRAP_CONTENT));
+        l.addView(tc, new LayoutParams(dp(34), ViewGroup.LayoutParams.WRAP_CONTENT));
+        l.addView(td, new LayoutParams(dp(54), ViewGroup.LayoutParams.WRAP_CONTENT));
         if (me) {
             GradientDrawable g = new GradientDrawable();
-            g.setColor(0x47F7D046); g.setCornerRadius(dp(5));
+            g.setColor(0x66F7D046); g.setCornerRadius(dp(8));
             l.setBackground(g);
         }
         return l;
