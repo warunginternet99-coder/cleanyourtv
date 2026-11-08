@@ -10,9 +10,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
       - name: Install SDK platform and build-tools
-        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-34" "build-tools;34.0.0"
       - name: Build release APK
         working-directory: launcher
         run: |
@@ -22,3 +24,4 @@ jobs:
         with:
           name: tvhome-apk
           path: launcher/app/build/outputs/apk/release/app-release.apk
+ 
