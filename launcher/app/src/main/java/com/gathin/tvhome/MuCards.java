@@ -1,3 +1,4 @@
+
 package com.gathin.tvhome;
  
 import android.content.Context;
@@ -76,7 +77,7 @@ public class MuCards extends LinearLayout {
     LinearLayout card() {
         LinearLayout l = new LinearLayout(getContext());
         l.setOrientation(VERTICAL);
-        l.setPadding(dp(18), dp(12), dp(18), dp(10));
+        l.setPadding(dp(18), dp(10), dp(18), dp(8));
         GradientDrawable g = new GradientDrawable();
         g.setColor(0xB3180F28); g.setCornerRadius(dp(20)); g.setStroke(dp(1), 0x33FFFFFF);
         l.setBackground(g);
@@ -110,27 +111,27 @@ public class MuCards extends LinearLayout {
         kRow.addView(kickerTv);
  
         title = tv(22, WHITE, false); title.setText("Memuat…");
-        title.setPadding(0, dp(5), 0, 0);
+        title.setPadding(0, dp(3), 0, 0);
         countdown = tv(15, GOLD, true);
-        countdown.setPadding(0, dp(4), 0, 0);
+        countdown.setPadding(0, dp(3), 0, 0);
         whenTv = tv(12.5f, MUTED, false);
         whenTv.setPadding(0, dp(2), 0, 0);
  
         formRow = new LinearLayout(getContext());
         formRow.setOrientation(HORIZONTAL);
         formRow.setGravity(Gravity.CENTER_VERTICAL);
-        formRow.setPadding(0, dp(6), 0, dp(6));
+        formRow.setPadding(0, dp(4), 0, dp(4));
  
         View line = new View(getContext());
         line.setBackgroundColor(0x33FFFFFF);
         lastHead = tv(13, WHITE, true);
-        lastHead.setPadding(0, dp(6), 0, 0);
+        lastHead.setPadding(0, dp(5), 0, 0);
         lastLines = new TextView(getContext());
         lastLines.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         lastLines.setTextColor(MUTED);
         lastLines.setIncludeFontPadding(false);
-        lastLines.setLineSpacing(0, 1.15f);
-        lastLines.setPadding(0, dp(3), 0, 0);
+        lastLines.setLineSpacing(0, 1.1f);
+        lastLines.setPadding(0, dp(2), 0, 0);
  
         col.addView(kRow); col.addView(title); col.addView(countdown); col.addView(whenTv); col.addView(formRow);
         col.addView(line, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1))));
@@ -425,7 +426,7 @@ public class MuCards extends LinearLayout {
         LinearLayout l = new LinearLayout(getContext());
         l.setOrientation(HORIZONTAL);
         l.setGravity(Gravity.CENTER_VERTICAL);
-        l.setPadding(dp(8), dp(3), dp(8), dp(3));
+        l.setPadding(dp(8), dp(2), dp(8), dp(2));
         TextView ta = tv(sp, col, bold); ta.setText(a);
         TextView tb = tv(sp, col, bold); tb.setText(b);
         TextView tc = tv(sp, col, bold); tc.setText(c); tc.setGravity(Gravity.END);
